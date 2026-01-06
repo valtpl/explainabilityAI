@@ -37,7 +37,11 @@ def main():
         selected_model_name = st.sidebar.selectbox("Select Classification Model", model_options)
 
         # XAI Selection
+        # XAI Selection
         xai_options = ['LIME', 'Grad-CAM', 'SHAP']
+        if selected_model_name == 'Custom_PB':
+            xai_options.remove('Grad-CAM')
+            
         selected_xai_methods = st.sidebar.multiselect("Select XAI Techniques", xai_options, default=['LIME'])
 
         # Process Input
