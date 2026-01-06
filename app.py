@@ -30,7 +30,7 @@ def main():
         # Model Selection
         model_options = []
         if file_type == 'audio':
-            model_options = ['VGG16', 'MobileNet', 'ResNet'] # These map to the same loaded model in our simplified loader, or we could implement switching if we had multiple models
+            model_options = ['Custom_PB', 'ResNet50', 'MobileNet'] # These map to the same loaded model in our simplified loader, or we could implement switching if we had multiple models
         elif file_type == 'image':
             model_options = ['DenseNet', 'AlexNet']
         

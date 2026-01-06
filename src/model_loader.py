@@ -37,14 +37,59 @@ class AudioModel(ModelInterface):
         print(f"Loading generic audio model: {model_name}...")
         self.class_names = ['real', 'fake']
         
-        # Select architecture
-        if model_name == 'VGG16':
-            base_model = tf.keras.applications.VGG16(include_top=False, weights='imagenet', input_shape=(224, 224, 3))
+        if model_name == 'Custom_PB':
+             print("Loading Custom PB model via TFSMLayer...")
+             model_path = os.path.join(os.getcwd(), 'saved_model', 'model')
+             if not os.path.exists(model_path):
+                 model_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'saved_model', 'model')
+             
+             try:
+                print("Attempting TFSMLayer...")
+                self.model = tf.keras.Sequential([
+                    tf.keras.layers.TFSMLayer(model_path, call_endpoint='serving_default')
+                ])
+                self.is_keras3 = True
+                self.last_conv_layer_name = None 
+                return
+             except Exception as e:
+                print(f"TFSMLayer failed: {e}")
+                print("Attempting raw tf.saved_model.load fallback...")
+                try:
+                    self.raw_model = tf.saved_model.load(model_path)
+                    
+                    # Wrapper to make raw model behave like Keras model for predict
+                    class RawWrapper:
+                        def __init__(self, raw_model):
+                            self.raw_model = raw_model
+                        
+                        def predict(self, x):
+                            # Default signature is usually what we want
+                            infer = self.raw_model.signatures['serving_default']
+                            # x needs to be constant tensor, float32
+                            x_tensor = tf.convert_to_tensor(x, dtype=tf.float32)
+                            out = infer(x_tensor)
+                            # out is a dict {'dense_1': tensor, ...} or similar
+                            # We return the first value found
+                            return list(out.values())[0].numpy()
+                            
+                    self.model = RawWrapper(self.raw_model)
+                    self.is_keras3 = False
+                    self.last_conv_layer_name = None # Cannot do gradcam on raw graph easily
+                    return
+                    
+                except Exception as e2:
+                    print(f"Raw load also failed: {e2}")
+                    # Fallback to MobileNet
+                    print("Falling back to generic MobileNetV2 (Random Weights/ImageNet) because loading failed.")
+                    base_model = tf.keras.applications.MobileNetV2(include_top=False, weights='imagenet', input_shape=(224, 224, 3))
+                    self.last_conv_layer_name = 'Conv_1'
         elif model_name == 'ResNet50':
             base_model = tf.keras.applications.ResNet50(include_top=False, weights='imagenet', input_shape=(224, 224, 3))
+            self.last_conv_layer_name = 'conv5_block3_out'
         else:
             # Default to MobileNetV2 if unknown or MobileNet requested
             base_model = tf.keras.applications.MobileNetV2(include_top=False, weights='imagenet', input_shape=(224, 224, 3))
+            self.last_conv_layer_name = 'Conv_1'
             
         # Add a custom head for 2 classes (Real vs Fake)
         # We perform this adaptation so the model structure is valid for the XAI tools (GradCAM needs a convolution layer)
@@ -59,6 +104,10 @@ class AudioModel(ModelInterface):
     def predict(self, input_data):
         prediction = self.model.predict(input_data)
         
+        if self.is_keras3 or isinstance(prediction, dict):
+             if isinstance(prediction, dict):
+                 prediction = list(prediction.values())[0] # Expecting {'output_0': probabilities}
+        
         class_idx = np.argmax(prediction)
         return {
             "label": self.class_names[class_idx],
@@ -69,6 +118,8 @@ class AudioModel(ModelInterface):
         }
     
     def get_model(self):
+        if hasattr(self, 'is_keras3') and self.is_keras3:
+            return Keras3Wrapper(self.model)
         return self.model
 
 class ImageModel(ModelInterface):

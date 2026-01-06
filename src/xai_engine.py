@@ -55,18 +55,22 @@ class XAIEngine:
             image_data = np.expand_dims(image_data, axis=0)
             
         if layer_name is None:
-            # Try to find a suitable layer
-            for layer in reversed(self.model.layers):
-                if 'conv' in layer.name.lower():
-                    layer_name = layer.name
-                    break
+            # Check if model interface has a specific layer defined
+            if hasattr(self.model_interface, 'last_conv_layer_name'):
+                layer_name = self.model_interface.last_conv_layer_name
+            else:
+                # Fallback: Try to find a suitable layer
+                for layer in reversed(self.model.layers):
+                    if 'conv' in layer.name.lower():
+                        layer_name = layer.name
+                        break
         
         if layer_name is None:
             return None
 
         try:
             grad_model = tf.keras.models.Model(
-                [self.model.inputs], 
+                self.model.inputs, 
                 [self.model.get_layer(layer_name).output, self.model.output]
             )
         except Exception as e:
@@ -142,9 +146,6 @@ class XAIEngine:
         preds = self.model.predict(np.expand_dims(image_data/255.0, axis=0))
         top_class = np.argmax(preds)
         
-        # Get shap values for top class
-        # shap_values[top_class] is (1, 50)
-        
         # Create a colored mask
         from matplotlib.colors import LinearSegmentedColormap
         colors = []
@@ -159,12 +160,28 @@ class XAIEngine:
             for i in range(len(values)):
                 out[segmentation == i+1] = values[i] # +1 because start_label=1
             return out
+
+        # Handle shap_values structure safely
+        shap_val = None
+        if isinstance(shap_values, list):
+            if top_class < len(shap_values):
+                shap_val = shap_values[top_class]
+            else:
+                # Fallback: if SHAP returned fewer lists than classes (e.g. binary handled as 1), take the last one or first
+                shap_val = shap_values[-1]
+        else:
+            # If it's a single array (not a list)
+            shap_val = shap_values
+
+        # Inspect shape of shap_val. It should be (1, num_features) or (num_features,)
+        shap_val = np.array(shap_val).flatten() 
+        # Now shap_val is 1D array of importance scores corresponding to segments 1..50
             
-        m = fill_segmentation(shap_values[top_class][0], segments_slic)
+        m = fill_segmentation(shap_val, segments_slic)
         
         fig, ax = plt.subplots(1, 1, figsize=(8, 8))
         ax.imshow(image_data.astype(np.uint8))
-        max_val = np.max(np.abs(shap_values[top_class][0]))
+        max_val = np.max(np.abs(shap_val))
         ax.imshow(m, cmap=cm, vmin=-max_val, vmax=max_val, alpha=0.5)
         ax.set_title(f"SHAP Explanation")
         ax.axis('off')
