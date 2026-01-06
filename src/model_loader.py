@@ -1,7 +1,10 @@
-import tensorflow as tf
 import os
+import tensorflow as tf
 import numpy as np
 import random
+
+
+
 
 class ModelInterface:
     def predict(self, input_data):
@@ -38,51 +41,40 @@ class AudioModel(ModelInterface):
         self.class_names = ['real', 'fake']
         
         if model_name == 'Custom_PB':
-             print("Loading Custom PB model via TFSMLayer...")
              model_path = os.path.join(os.getcwd(), 'saved_model', 'model')
              if not os.path.exists(model_path):
                  model_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'saved_model', 'model')
              
+             print("Loading Custom PB model via tf.saved_model.load...")
              try:
-                print("Attempting TFSMLayer...")
-                self.model = tf.keras.Sequential([
-                    tf.keras.layers.TFSMLayer(model_path, call_endpoint='serving_default')
-                ])
-                self.is_keras3 = True
-                self.last_conv_layer_name = None 
-                return
-             except Exception as e:
-                print(f"TFSMLayer failed: {e}")
-                print("Attempting raw tf.saved_model.load fallback...")
-                try:
-                    self.raw_model = tf.saved_model.load(model_path)
+                self.raw_model = tf.saved_model.load(model_path)
+                
+                # Wrapper to make raw model behave like Keras model for predict
+                class RawWrapper:
+                    def __init__(self, raw_model):
+                        self.raw_model = raw_model
                     
-                    # Wrapper to make raw model behave like Keras model for predict
-                    class RawWrapper:
-                        def __init__(self, raw_model):
-                            self.raw_model = raw_model
+                    def predict(self, x):
+                        # Default signature is usually what we want
+                        infer = self.raw_model.signatures['serving_default']
+                        # x needs to be constant tensor, float32
+                        x_tensor = tf.convert_to_tensor(x, dtype=tf.float32)
+                        out = infer(x_tensor)
+                        # out is a dict {'dense_1': tensor, ...} or similar
+                        # We return the first value found
+                        return list(out.values())[0].numpy()
                         
-                        def predict(self, x):
-                            # Default signature is usually what we want
-                            infer = self.raw_model.signatures['serving_default']
-                            # x needs to be constant tensor, float32
-                            x_tensor = tf.convert_to_tensor(x, dtype=tf.float32)
-                            out = infer(x_tensor)
-                            # out is a dict {'dense_1': tensor, ...} or similar
-                            # We return the first value found
-                            return list(out.values())[0].numpy()
-                            
-                    self.model = RawWrapper(self.raw_model)
-                    self.is_keras3 = False
-                    self.last_conv_layer_name = None # Cannot do gradcam on raw graph easily
-                    return
-                    
-                except Exception as e2:
-                    print(f"Raw load also failed: {e2}")
-                    # Fallback to MobileNet
-                    print("Falling back to generic MobileNetV2 (Random Weights/ImageNet) because loading failed.")
-                    base_model = tf.keras.applications.MobileNetV2(include_top=False, weights='imagenet', input_shape=(224, 224, 3))
-                    self.last_conv_layer_name = 'Conv_1'
+                self.model = RawWrapper(self.raw_model)
+                self.is_keras3 = False
+                self.last_conv_layer_name = None # Cannot do gradcam on raw graph easily
+                return
+                
+             except Exception as e:
+                print(f"Loading failed: {e}")
+                # Fallback to MobileNet
+                print("Falling back to generic MobileNetV2 (Random Weights/ImageNet) because loading failed.")
+                base_model = tf.keras.applications.MobileNetV2(include_top=False, weights='imagenet', input_shape=(224, 224, 3))
+                self.last_conv_layer_name = 'Conv_1'
         elif model_name == 'ResNet50':
             base_model = tf.keras.applications.ResNet50(include_top=False, weights='imagenet', input_shape=(224, 224, 3))
             self.last_conv_layer_name = 'conv5_block3_out'
