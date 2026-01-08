@@ -37,7 +37,7 @@ def main():
         # XAI Selection
         # XAI Selection
         xai_options = ['LIME', 'Grad-CAM', 'SHAP']
-        if selected_model_name == 'Custom_PB':
+        if selected_model_name in ['Custom_PB', 'LungCancer_Best']:
             xai_options.remove('Grad-CAM')
             
         selected_xai_methods = st.sidebar.multiselect("Select XAI Techniques", xai_options, default=['LIME'])
