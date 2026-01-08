@@ -4,8 +4,6 @@ import numpy as np
 import random
 
 
-
-
 class ModelInterface:
     def predict(self, input_data):
         raise NotImplementedError("Subclasses must implement predict method")
@@ -140,6 +138,70 @@ class ImageModel(ModelInterface):
     def get_model(self):
         return self.model
 
+class LungCancerModel(ModelInterface):
+    def __init__(self, model_name='BestModel'):
+        print(f"Loading Lung Cancer model: {model_name}...")
+        self.class_names = ['Normal', 'Pneumonia/Abnormal']
+        self.model = None
+        self.last_conv_layer_name = None
+        
+        base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        model_path = os.path.join(base_dir, 'notebooks', 'LungCancer', 'saved_model', 'best_chest_xray_model.h5')
+        
+        if not os.path.exists(model_path):
+             print(f"Model not found at {model_path}. Please run download_model.py in lung_cancer_experiments.")
+             return
+
+        try:
+            # We use compile=False to avoid issues with optimizer states in older models
+            # and to prevent the 'compiled metrics' warning.
+            self.model = tf.keras.models.load_model(model_path, compile=False)
+            print("Model loaded successfully.")
+            
+            # Find conv layer
+            for layer in reversed(self.model.layers):
+                 if 'conv' in layer.name.lower():
+                     self.last_conv_layer_name = layer.name
+                     break
+        except Exception as e:
+            print(f"CRITICAL: Failed to load Lung Cancer model: {e}")
+            self.model = None
+
+    def predict(self, input_data):
+        if self.model is None:
+            # Return a safe dummy response so the UI doesn't crash
+            return {
+                "label": "Model Error",
+                "probability": 0.0,
+                "predictions": np.array([0]),
+                "class_idx": -1,
+                "class_names": self.class_names
+            }
+            
+        prediction = self.model.predict(input_data)
+        
+        # Logic from test_xai.py
+        if prediction.shape[-1] == 1:
+            prob = prediction[0][0]
+            label = self.class_names[1] if prob >= 0.5 else self.class_names[0]
+            probability = prob if prob >= 0.5 else 1 - prob
+            class_idx = 1 if prob >= 0.5 else 0
+        else:
+            class_idx = np.argmax(prediction)
+            label = self.class_names[class_idx]
+            probability = float(np.max(prediction))
+            
+        return {
+            "label": label,
+            "probability": float(probability),
+            "predictions": prediction,
+            "class_idx": class_idx,
+            "class_names": self.class_names
+        }
+
+    def get_model(self):
+        return self.model
+
 class ModelFactory:
     @staticmethod
     def get_model(input_type, model_name):
@@ -147,6 +209,8 @@ class ModelFactory:
             # We now use standard models selected by name, ignoring the file system .pb model
             return AudioModel(model_name)
         elif input_type == 'image':
+            if model_name == 'LungCancer_Best':
+                return LungCancerModel(model_name)
             return ImageModel(model_name)
         else:
             raise ValueError(f"Unknown input type: {input_type}")

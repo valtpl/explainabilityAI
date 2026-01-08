@@ -13,6 +13,8 @@ class XAIEngine:
     def __init__(self, model_interface):
         self.model_interface = model_interface
         self.model = model_interface.get_model()
+        if self.model is None:
+            raise ValueError("Model is not initialized (None). Cannot perform XAI explanations.")
 
     def lime_explain(self, image_data, num_samples=100):
         # image_data is (224, 224, 3) or similar, not batch

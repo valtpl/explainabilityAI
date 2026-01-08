@@ -1,7 +1,5 @@
 import os
-# Set environment variables before importing tensorflow/keras
-os.environ["TF_USE_LEGACY_KERAS"] = "1"
-os.environ["TF_ENABLE_ONEDNN_OPTS"] = "0"
+# Env vars removed to match working script environment
 
 import streamlit as st
 import numpy as np
@@ -32,7 +30,7 @@ def main():
         if file_type == 'audio':
             model_options = ['Custom_PB', 'ResNet50', 'MobileNet'] # These map to the same loaded model in our simplified loader, or we could implement switching if we had multiple models
         elif file_type == 'image':
-            model_options = ['DenseNet', 'AlexNet']
+            model_options = ['LungCancer_Best', 'DenseNet', 'AlexNet']
         
         selected_model_name = st.sidebar.selectbox("Select Classification Model", model_options)
 
@@ -81,30 +79,41 @@ def main():
                         
                         # XAI
                         if selected_xai_methods:
-                            st.header("Explainability Analysis")
-                            xai_engine = XAIEngine(model_interface)
-                            
-                            # Create columns for side-by-side comparison
-                            cols = st.columns(len(selected_xai_methods))
-                            
-                            for idx, method in enumerate(selected_xai_methods):
-                                with cols[idx]:
-                                    st.subheader(method)
-                                    if method == 'LIME':
-                                        with st.spinner("Running LIME..."):
-                                            fig = xai_engine.lime_explain(np.array(display_image))
-                                            st.pyplot(fig)
-                                    elif method == 'Grad-CAM':
-                                        with st.spinner("Running Grad-CAM..."):
-                                            fig = xai_engine.grad_cam_explain(input_data)
-                                            if fig:
-                                                st.pyplot(fig)
-                                            else:
-                                                st.warning("Grad-CAM failed (layer not found?)")
-                                    elif method == 'SHAP':
-                                        with st.spinner("Running SHAP (this may take a while)..."):
-                                            fig = xai_engine.shap_explain(np.array(display_image))
-                                            st.pyplot(fig)
+                            # Robustness check: if prediction failed, likely model is bad
+                            if prediction_result.get("label") == "Model Error":
+                                st.warning("Cannot run XAI because the model failed to load or predict.")
+                            else:
+                                st.header("Explainability Analysis")
+                                try:
+                                    xai_engine = XAIEngine(model_interface)
+                                    
+                                    # Create columns for side-by-side comparison
+                                    cols = st.columns(len(selected_xai_methods))
+                                    
+                                    for idx, method in enumerate(selected_xai_methods):
+                                        with cols[idx]:
+                                            st.subheader(method)
+                                            if method == 'LIME':
+                                                with st.spinner("Running LIME..."):
+                                                    fig = xai_engine.lime_explain(np.array(display_image))
+                                                    st.pyplot(fig)
+                                            elif method == 'Grad-CAM':
+                                                with st.spinner("Running Grad-CAM..."):
+                                                    fig = xai_engine.grad_cam_explain(input_data)
+                                                    if fig:
+                                                        st.pyplot(fig)
+                                                    else:
+                                                        st.warning("Grad-CAM failed (layer not found?)")
+                                            elif method == 'SHAP':
+                                                with st.spinner("Running SHAP (this may take a while)..."):
+                                                    fig = xai_engine.shap_explain(np.array(display_image))
+                                                    st.pyplot(fig)
+                                except ValueError as ve:
+                                    st.error(f"XAI Error: {ve}")
+                                except Exception as e:
+                                    st.error(f"An unexpected error occurred during XAI: {e}")
+                                    import traceback
+                                    st.code(traceback.format_exc())
                     except Exception as e:
                         st.error(f"An error occurred: {e}")
                         import traceback
